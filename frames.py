@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-SIZE = 21
+SIZE = 31
 DEG_PER_PIXEL = 5
 
 
@@ -30,9 +30,15 @@ def stimulus_receding(rv_ms=20, dt_ms=5):
 
 
 def stimulus_translation(n_frames, radius=4):
-    xs = np.linspace(4, SIZE - 5, n_frames)  # центр їде зліва направо
+    xs = np.linspace(7, SIZE - 8, n_frames)
     return np.array([make_frame(radius, cx=x) for x in xs])
 
+def stimulus_vertical_translation(n_frames, radius=4):
+    ys = np.linspace(7, SIZE - 8, n_frames)
+    return np.array([
+        make_frame(radius, cy=y)
+        for y in ys
+    ])
 if __name__ == "__main__":
     loom = stimulus_looming()
     recede = stimulus_receding()
