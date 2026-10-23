@@ -18,11 +18,26 @@ SECTORS = ("right", "left", "up", "down")
 DEFAULT_GAIN = 0.5
 
 
-def radial_masks(cx=SIZE // 2, cy=SIZE // 2):
+def radial_masks(shape, cx=None, cy=None):
+    if (
+        not isinstance(shape, (tuple, list)) or
+        len(shape) != 2 or
+        any(
+            not isinstance(value, (int, np.integer)) or value < 2
+            for value in shape
+        )
+    ):
+        raise ValueError("shape must be a pair of integers greater than 1")
+
+    height, width = shape
+    if cx is None:
+        cx = (width - 1) / 2
+    if cy is None:
+        cy = (height - 1) / 2
     if not np.isfinite(cx) or not np.isfinite(cy):
         raise ValueError("cx and cy must be finite numbers")
 
-    y, x = np.mgrid[:SIZE, :SIZE]
+    y, x = np.mgrid[:height, :width]
     dx = x - cx
     dy = cy - y
     angle = np.arctan2(dy, dx)
@@ -52,10 +67,10 @@ def radial_masks(cx=SIZE // 2, cy=SIZE // 2):
     }
 
 
-def sector_signals(stack, cx=SIZE // 2, cy=SIZE // 2):
+def sector_signals(stack, cx=None, cy=None):
     """Return signed radial signals in right, left, up, down order."""
     right, left, up, down = motion_maps(stack)
-    masks = radial_masks(cx, cy)
+    masks = radial_masks(stack.shape[1:], cx, cy)
 
     return np.stack([
         (right * masks["right"] - left * masks["right"]).sum(axis=(1, 2)),

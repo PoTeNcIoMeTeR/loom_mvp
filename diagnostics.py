@@ -8,7 +8,7 @@ from lif import DT
 
 
 def show_radial_masks():
-    masks = radial_masks()
+    masks = radial_masks((SIZE, SIZE))
     _, axes = plt.subplots(1, 4, figsize=(12, 3))
 
     for ax, (name, mask) in zip(axes, masks.items()):
@@ -21,7 +21,7 @@ def show_radial_masks():
 
 
 def diagnose_masks():
-    masks = radial_masks()
+    masks = radial_masks((SIZE, SIZE))
     total = np.zeros((SIZE, SIZE), dtype=int)
 
     print("\n=== Діагностика масок ===")
