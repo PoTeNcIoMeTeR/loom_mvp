@@ -19,25 +19,32 @@ class LIFNeuron:
         self.last_spike_voltage = None
         self.refractory_steps = max(1, int(np.ceil(T_REF / self.dt_ms)))
 
-    def step(self, current):
+    def step(self, current, dt_ms=None):
         if not np.isfinite(current):
             raise ValueError("current must be a finite number")
+        if dt_ms is None:
+            dt_ms = self.dt_ms
+        if not np.isfinite(dt_ms) or dt_ms <= 0:
+            raise ValueError("dt_ms must be a positive finite number")
+        dt_ms = float(dt_ms)
 
         self.last_spike_voltage = None
         if self.refractory_left > 0:
             self.v = V_RESET
-            self.refractory_left -= 1
+            self.refractory_left = max(0.0, self.refractory_left - dt_ms)
             return False
 
-        dv = (
-            -(self.v - V_REST) + float(current)
-        ) * self.dt_ms / TAU_M
-        self.v += dv
+        decay = np.exp(-dt_ms / TAU_M)
+        self.v = (
+            V_REST +
+            (self.v - V_REST) * decay +
+            float(current) * (1.0 - decay)
+        )
 
         if self.v >= V_THRESHOLD:
             self.last_spike_voltage = self.v
             self.v = V_RESET
-            self.refractory_left = max(0, self.refractory_steps - 1)
+            self.refractory_left = T_REF
             return True
 
         return False

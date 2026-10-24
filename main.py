@@ -90,7 +90,7 @@ def _direction_metrics(signals):
 
 
 def _dashboard(frame, processed, motion, drive, signals, neuron, spiked,
-               drive_history, voltage_history):
+               drive_history, voltage_history, dt_ms, actual_fps):
     display_size = (320, 240)
     original = _label_panel(cv2.resize(frame, display_size), "Input video")
     processed_image = (processed * 255).clip(0, 255).astype(np.uint8)
@@ -116,7 +116,8 @@ def _dashboard(frame, processed, motion, drive, signals, neuron, spiked,
         f"Drive: {drive:.4f}",
         f"Voltage: {neuron.v:.4f}",
         f"Threshold: {V_THRESHOLD:.4f}",
-        f"Refractory: {neuron.refractory_left}",
+        f"Refractory: {neuron.refractory_left:.1f} ms",
+        f"dt: {dt_ms:.2f} ms  FPS: {actual_fps:.2f}",
         f"Signals R/L/U/D: {signals[0]:.2f} {signals[1]:.2f}",
         f"             {signals[2]:.2f} {signals[3]:.2f}",
         f"Excitation: {total_excitation:.2f}",
@@ -149,12 +150,20 @@ def run(source=0, size=FRAME_SIZE, dt_ms=DT, log_path="realtime_log.csv"):
         log_file.close()
         raise RuntimeError(f"Could not open video source: {source}")
 
-    neuron = LIFNeuron(dt_ms=dt_ms)
+    source_fps = float(capture.get(cv2.CAP_PROP_FPS))
+    is_camera = isinstance(source, (int, np.integer))
+    nominal_dt_ms = (
+        1000.0 / source_fps
+        if not is_camera and np.isfinite(source_fps) and source_fps > 0
+        else float(dt_ms)
+    )
+    neuron = LIFNeuron(dt_ms=nominal_dt_ms)
     buffer = []
     drive_history = deque(maxlen=HISTORY_SIZE)
     voltage_history = deque(maxlen=HISTORY_SIZE)
     frame_index = 0
     started_at = perf_counter()
+    previous_frame_time = None
 
     try:
         writer = csv.writer(log_file)
@@ -163,7 +172,8 @@ def run(source=0, size=FRAME_SIZE, dt_ms=DT, log_path="realtime_log.csv"):
             "refractory_left", "spike", "right_signal", "left_signal",
             "up_signal", "down_signal", "total_excitation",
             "dominant_sector", "horizontal_vertical_ratio",
-            "left_right_symmetry", "up_down_symmetry",
+            "left_right_symmetry", "up_down_symmetry", "dt_ms",
+            "actual_fps",
         ])
 
         while True:
@@ -176,6 +186,18 @@ def run(source=0, size=FRAME_SIZE, dt_ms=DT, log_path="realtime_log.csv"):
             if len(buffer) > 2:
                 buffer.pop(0)
 
+            now = perf_counter()
+            if is_camera:
+                current_dt_ms = (
+                    float(dt_ms)
+                    if previous_frame_time is None
+                    else max((now - previous_frame_time) * 1000.0, 1e-3)
+                )
+            else:
+                current_dt_ms = nominal_dt_ms
+            previous_frame_time = now
+            actual_fps = 1000.0 / current_dt_ms
+
             drive_value = 0.0
             signals = np.zeros(4)
             motion = np.zeros((4, *processed.shape), dtype=float)
@@ -186,7 +208,7 @@ def run(source=0, size=FRAME_SIZE, dt_ms=DT, log_path="realtime_log.csv"):
                 motion = motion_maps(stack)[:, 0]
                 drive_value = float(drive[-1])
                 signals = signals_by_time[-1]
-                spiked = neuron.step(drive_value)
+                spiked = neuron.step(drive_value, dt_ms=current_dt_ms)
 
             (
                 total_excitation,
@@ -205,12 +227,14 @@ def run(source=0, size=FRAME_SIZE, dt_ms=DT, log_path="realtime_log.csv"):
                 f"{total_excitation:.6f}", dominant_sector,
                 f"{horizontal_vertical_ratio:.6f}",
                 f"{left_right_symmetry:.6f}", f"{up_down_symmetry:.6f}",
+                f"{current_dt_ms:.6f}", f"{actual_fps:.6f}",
             ])
             log_file.flush()
 
             dashboard = _dashboard(
                 frame, processed, motion, drive_value, signals, neuron,
-                spiked, drive_history, voltage_history,
+                spiked, drive_history, voltage_history, current_dt_ms,
+                actual_fps,
             )
             cv2.imshow("LPLC2 real-time dashboard", dashboard)
             frame_index += 1
@@ -224,4 +248,4 @@ def run(source=0, size=FRAME_SIZE, dt_ms=DT, log_path="realtime_log.csv"):
 
 
 if __name__ == "__main__":
-    run(r"C:\Users\gavaj\Downloads\10.avi")
+    run(r"C:\Users\gavaj\Downloads\345.avi")
