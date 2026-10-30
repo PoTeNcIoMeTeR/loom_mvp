@@ -82,8 +82,8 @@ def sector_signals(stack, cx=None, cy=None):
 
 def lplc2_bio_drive(
     stack,
-    cx=SIZE // 2,
-    cy=SIZE // 2,
+    cx=None,
+    cy=None,
     saturation=1.0,
     inhibition_gain=0.5,
     coincidence_gain=1.0,
@@ -118,6 +118,32 @@ def lplc2_bio_drive(
         - inhibition_gain * opponent_inhibition
     )
     return np.maximum(drive, 0.0), signals
+
+
+def lplc2_grid_bio_drive(stack, centers, **kwargs):
+    """Compute LPLC2-like drives for several receptive-field centers."""
+    centers = tuple(centers)
+    if not centers:
+        raise ValueError("centers must contain at least one (cx, cy) pair")
+
+    drives = []
+    signals = []
+    for center in centers:
+        if (
+            not isinstance(center, (tuple, list)) or
+            len(center) != 2
+        ):
+            raise ValueError("each center must be a (cx, cy) pair")
+        drive, center_signals = lplc2_bio_drive(
+            stack,
+            cx=center[0],
+            cy=center[1],
+            **kwargs,
+        )
+        drives.append(drive)
+        signals.append(center_signals)
+
+    return np.stack(drives, axis=1), np.stack(signals, axis=1)
 
 
 def plot_lif_response(name, signal, gain=1.0, dt_ms=DT):

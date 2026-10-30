@@ -1,17 +1,34 @@
 import cv2
-import csv
 import numpy as np
 from collections import deque
+from pathlib import Path
 from time import perf_counter
 
 from lif import DT, LIFNeuron, V_THRESHOLD
-from lplc2 import lplc2_bio_drive
+from lplc2 import lplc2_grid_bio_drive
 from motion import motion_maps
+from run_logger import RunLogger
 
 
 FRAME_SIZE = (32, 32)
 HISTORY_SIZE = 120
 SECTOR_NAMES = ("right", "left", "up", "down")
+GRID_SIZE = (3, 3)
+WARMUP_FRAMES = 15
+
+
+def _grid_centers(shape, grid_size=GRID_SIZE):
+    height, width = shape
+    rows, columns = grid_size
+    if rows < 1 or columns < 1:
+        raise ValueError("grid_size values must be positive")
+    x_values = np.linspace((width - 1) / 4, 3 * (width - 1) / 4, columns)
+    y_values = np.linspace((height - 1) / 4, 3 * (height - 1) / 4, rows)
+    return tuple(
+        (float(cx), float(cy))
+        for cy in y_values
+        for cx in x_values
+    )
 
 
 def preprocess_frame(frame, size=FRAME_SIZE):
@@ -90,7 +107,8 @@ def _direction_metrics(signals):
 
 
 def _dashboard(frame, processed, motion, drive, signals, neuron, spiked,
-               drive_history, voltage_history, dt_ms, actual_fps):
+               active_center, drive_history,
+               voltage_history, dt_ms, actual_fps):
     display_size = (320, 240)
     original = _label_panel(cv2.resize(frame, display_size), "Input video")
     processed_image = (processed * 255).clip(0, 255).astype(np.uint8)
@@ -124,15 +142,12 @@ def _dashboard(frame, processed, motion, drive, signals, neuron, spiked,
         f"Dominant: {dominant_sector}",
         f"H/V ratio: {horizontal_vertical_ratio:.2f}",
         f"Sym L/R U/D: {left_right_symmetry:.2f} {up_down_symmetry:.2f}",
+        f"Active center: {active_center}",
     ]
     for index, text in enumerate(entries):
-        cv2.putText(stats, text, (10, 25 + index * 19),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.38, (220, 220, 220), 1,
+        cv2.putText(stats, text, (10, 20 + index * 17),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.34, (220, 220, 220), 1,
                     cv2.LINE_AA)
-    status = "SPIKE" if spiked else "NO SPIKE"
-    status_color = (0, 0, 255) if spiked else (0, 180, 0)
-    cv2.putText(stats, status, (10, 232), cv2.FONT_HERSHEY_SIMPLEX, 0.75,
-                status_color, 2, cv2.LINE_AA)
 
     top = np.hstack((original, processed_image, motion_image, stats))
     drive_plot = _plot_history(drive_history, "Drive history", limit=V_THRESHOLD)
@@ -142,13 +157,79 @@ def _dashboard(frame, processed, motion, drive, signals, neuron, spiked,
     return np.vstack((top, plots))
 
 
-def run(source=0, size=FRAME_SIZE, dt_ms=DT, log_path="realtime_log.csv"):
+def _grid_dashboard(
+    spike_counts, spiked_indices, alarm_triggered, warming_up=False
+):
+    """Render the nine receptive-field neurons in a separate window."""
+    rows, columns = GRID_SIZE
+    cell_size = 120
+    panel = np.full(
+        (rows * cell_size, columns * cell_size, 3),
+        (35, 35, 35),
+        dtype=np.uint8,
+    )
+    current_spikes = set(spiked_indices)
+    for index, count in enumerate(spike_counts):
+        row, column = divmod(index, columns)
+        x0, y0 = column * cell_size, row * cell_size
+        if index in current_spikes:
+            color = (0, 0, 220)
+        elif count > 0:
+            color = (0, 0, 130)
+        else:
+            color = (0, 150, 0)
+        cv2.rectangle(
+            panel, (x0 + 3, y0 + 3),
+            (x0 + cell_size - 3, y0 + cell_size - 3),
+            color, cv2.FILLED,
+        )
+        cv2.putText(
+            panel, f"Neuron {index + 1}", (x0 + 10, y0 + 30),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.45, (235, 235, 235), 1,
+            cv2.LINE_AA,
+        )
+        cv2.putText(
+            panel, f"spikes: {int(count)}", (x0 + 10, y0 + 72),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1,
+            cv2.LINE_AA,
+        )
+    if warming_up:
+        status, status_color = "WARMING UP", (0, 180, 220)
+    else:
+        status = "ALARM" if alarm_triggered else "NO ALARM"
+        status_color = (0, 0, 255) if alarm_triggered else (0, 220, 0)
+    cv2.putText(
+        panel, status, (10, rows * cell_size - 10),
+        cv2.FONT_HERSHEY_SIMPLEX, 0.7, status_color, 2, cv2.LINE_AA,
+    )
+    return panel
+
+
+def run(
+    source=0,
+    size=FRAME_SIZE,
+    dt_ms=DT,
+    log_path=None,
+    snapshot_dir=None,
+):
+    if log_path is None or snapshot_dir is None:
+        source_name = (
+            "webcam"
+            if isinstance(source, (int, np.integer))
+            else Path(str(source)).stem
+        )
+        output_dir = Path("runs") / source_name
+        output_dir.mkdir(parents=True, exist_ok=True)
+        if log_path is None:
+            log_path = output_dir / "realtime_log.csv"
+        if snapshot_dir is None:
+            snapshot_dir = output_dir / "first_spike_frames"
+
     # Truncate the log before opening any source, including a failed source.
-    log_file = open(log_path, "w", newline="", encoding="utf-8")
     capture = cv2.VideoCapture(source)
     if not capture.isOpened():
-        log_file.close()
         raise RuntimeError(f"Could not open video source: {source}")
+    logger = RunLogger(log_path, snapshot_dir)
 
     source_fps = float(capture.get(cv2.CAP_PROP_FPS))
     is_camera = isinstance(source, (int, np.integer))
@@ -157,25 +238,20 @@ def run(source=0, size=FRAME_SIZE, dt_ms=DT, log_path="realtime_log.csv"):
         if not is_camera and np.isfinite(source_fps) and source_fps > 0
         else float(dt_ms)
     )
-    neuron = LIFNeuron(dt_ms=nominal_dt_ms)
+    centers = _grid_centers(size)
+    neurons = [LIFNeuron(dt_ms=nominal_dt_ms) for _ in centers]
     buffer = []
     drive_history = deque(maxlen=HISTORY_SIZE)
     voltage_history = deque(maxlen=HISTORY_SIZE)
     frame_index = 0
     started_at = perf_counter()
     previous_frame_time = None
+    alarm_triggered = False
+    first_spike_frame = None
+    first_spike_neuron = None
+    spike_counts = np.zeros(len(neurons), dtype=int)
 
     try:
-        writer = csv.writer(log_file)
-        writer.writerow([
-            "frame_index", "timestamp_ms", "drive", "voltage",
-            "refractory_left", "spike", "right_signal", "left_signal",
-            "up_signal", "down_signal", "total_excitation",
-            "dominant_sector", "horizontal_vertical_ratio",
-            "left_right_symmetry", "up_down_symmetry", "dt_ms",
-            "actual_fps",
-        ])
-
         while True:
             ok, frame = capture.read()
             if not ok:
@@ -200,15 +276,50 @@ def run(source=0, size=FRAME_SIZE, dt_ms=DT, log_path="realtime_log.csv"):
 
             drive_value = 0.0
             signals = np.zeros(4)
+            active_center = "none"
+            active_neuron = neurons[0]
             motion = np.zeros((4, *processed.shape), dtype=float)
             spiked = False
+            spiked_indices = []
             if len(buffer) == 2:
                 stack = np.stack(buffer, axis=0)
-                drive, signals_by_time = lplc2_bio_drive(stack)
+                drive, signals_by_time = lplc2_grid_bio_drive(
+                    stack, centers
+                )
                 motion = motion_maps(stack)[:, 0]
-                drive_value = float(drive[-1])
-                signals = signals_by_time[-1]
-                spiked = neuron.step(drive_value, dt_ms=current_dt_ms)
+                current_drives = drive[-1]
+                current_signals = signals_by_time[-1]
+                drive_value = float(np.max(current_drives))
+                active_index = int(np.argmax(current_drives))
+                signals = current_signals[active_index]
+                active_neuron = neurons[active_index]
+                active_center = (
+                    f"{centers[active_index][0]:.1f},"
+                    f"{centers[active_index][1]:.1f}"
+                )
+                warming_up = frame_index < WARMUP_FRAMES
+                spiked_indices = [
+                    index
+                    for index, (neuron, current) in enumerate(
+                        zip(neurons, current_drives)
+                    )
+                    if not warming_up and neuron.step(
+                        current, dt_ms=current_dt_ms
+                    )
+                ]
+                spiked = bool(spiked_indices)
+                if spiked:
+                    spike_counts[spiked_indices] += 1
+                if spiked and not alarm_triggered:
+                    alarm_triggered = True
+                    first_spike_frame = frame_index
+                    first_spike_neuron = spiked_indices[0] + 1
+                    active_index = spiked_indices[0]
+                    active_neuron = neurons[active_index]
+                    active_center = (
+                        f"{centers[active_index][0]:.1f},"
+                        f"{centers[active_index][1]:.1f}"
+                    )
 
             (
                 total_excitation,
@@ -218,34 +329,52 @@ def run(source=0, size=FRAME_SIZE, dt_ms=DT, log_path="realtime_log.csv"):
                 up_down_symmetry,
             ) = _direction_metrics(signals)
             drive_history.append(drive_value)
-            voltage_history.append(neuron.v)
+            voltage_history.append(active_neuron.v)
             timestamp_ms = (perf_counter() - started_at) * 1000
-            writer.writerow([
+            logger.write_frame([
                 frame_index, f"{timestamp_ms:.3f}", f"{drive_value:.6f}",
-                f"{neuron.v:.6f}", neuron.refractory_left, int(spiked),
+                f"{active_neuron.v:.6f}", active_neuron.refractory_left,
+                int(spiked),
                 *[f"{value:.6f}" for value in signals],
                 f"{total_excitation:.6f}", dominant_sector,
                 f"{horizontal_vertical_ratio:.6f}",
                 f"{left_right_symmetry:.6f}", f"{up_down_symmetry:.6f}",
                 f"{current_dt_ms:.6f}", f"{actual_fps:.6f}",
+                active_center,
+                ",".join(str(index + 1) for index in spiked_indices),
+                "" if first_spike_frame is None else first_spike_frame,
+                "" if first_spike_neuron is None else first_spike_neuron,
             ])
-            log_file.flush()
-
             dashboard = _dashboard(
-                frame, processed, motion, drive_value, signals, neuron,
-                spiked, drive_history, voltage_history, current_dt_ms,
+                frame, processed, motion, drive_value, signals, active_neuron,
+                spiked, active_center, drive_history,
+                voltage_history, current_dt_ms,
                 actual_fps,
             )
+            grid_dashboard = _grid_dashboard(
+                spike_counts, spiked_indices, alarm_triggered,
+                frame_index < WARMUP_FRAMES,
+            )
+            if spiked and first_spike_frame == frame_index:
+                logger.save_first_spike(
+                    frame, dashboard, grid_dashboard,
+                    frame_index, active_center,
+                )
             cv2.imshow("LPLC2 real-time dashboard", dashboard)
+            cv2.imshow(
+                "LPLC2 neuron grid",
+                grid_dashboard,
+            )
             frame_index += 1
             key = cv2.waitKey(10)
             if key != -1 and (key & 0xFF) in (ord("q"), ord("Q"), 27):
                 break
     finally:
-        log_file.close()
+        logger.close()
         capture.release()
         cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":
-    run(r"C:\Users\gavaj\Downloads\345.avi")
+    run(r"C:\Users\gavaj\Downloads\3.avi")
+   # run(0)
