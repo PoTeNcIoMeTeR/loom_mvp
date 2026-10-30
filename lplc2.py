@@ -67,10 +67,24 @@ def radial_masks(shape, cx=None, cy=None):
     }
 
 
-def sector_signals(stack, cx=None, cy=None):
+def sector_signals(stack, cx=None, cy=None, region=None):
     """Return signed radial signals in right, left, up, down order."""
     right, left, up, down = motion_maps(stack)
     masks = radial_masks(stack.shape[1:], cx, cy)
+    if region is not None:
+        y0, y1, x0, x1 = region
+        height, width = stack.shape[1:]
+        if not (
+            0 <= y0 < y1 <= height and
+            0 <= x0 < x1 <= width
+        ):
+            raise ValueError("region must be inside the frame")
+        local_mask = np.zeros((height, width), dtype=float)
+        local_mask[y0:y1, x0:x1] = 1.0
+        masks = {
+            name: mask * local_mask
+            for name, mask in masks.items()
+        }
 
     return np.stack([
         (right * masks["right"] - left * masks["right"]).sum(axis=(1, 2)),
@@ -84,6 +98,7 @@ def lplc2_bio_drive(
     stack,
     cx=None,
     cy=None,
+    region=None,
     saturation=1.0,
     inhibition_gain=0.5,
     coincidence_gain=1.0,
@@ -99,7 +114,7 @@ def lplc2_bio_drive(
     if not np.isfinite(coincidence_power) or coincidence_power <= 0:
         raise ValueError("coincidence_power must be positive and finite")
 
-    signals = sector_signals(stack, cx, cy)
+    signals = sector_signals(stack, cx, cy, region)
     excitation = np.maximum(signals, 0.0)
     inhibition = np.maximum(-signals, 0.0)
 
@@ -120,15 +135,19 @@ def lplc2_bio_drive(
     return np.maximum(drive, 0.0), signals
 
 
-def lplc2_grid_bio_drive(stack, centers, **kwargs):
+def lplc2_grid_bio_drive(stack, centers, regions=None, **kwargs):
     """Compute LPLC2-like drives for several receptive-field centers."""
     centers = tuple(centers)
     if not centers:
         raise ValueError("centers must contain at least one (cx, cy) pair")
+    if regions is not None:
+        regions = tuple(regions)
+        if len(regions) != len(centers):
+            raise ValueError("regions must match centers")
 
     drives = []
     signals = []
-    for center in centers:
+    for index, center in enumerate(centers):
         if (
             not isinstance(center, (tuple, list)) or
             len(center) != 2
@@ -138,6 +157,7 @@ def lplc2_grid_bio_drive(stack, centers, **kwargs):
             stack,
             cx=center[0],
             cy=center[1],
+            region=None if regions is None else regions[index],
             **kwargs,
         )
         drives.append(drive)

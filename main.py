@@ -31,6 +31,19 @@ def _grid_centers(shape, grid_size=GRID_SIZE):
     )
 
 
+def _grid_regions(shape, grid_size=GRID_SIZE):
+    height, width = shape
+    rows, columns = grid_size
+    y_edges = np.linspace(0, height, rows + 1, dtype=int)
+    x_edges = np.linspace(0, width, columns + 1, dtype=int)
+    return tuple(
+        (int(y_edges[row]), int(y_edges[row + 1]),
+         int(x_edges[column]), int(x_edges[column + 1]))
+        for row in range(rows)
+        for column in range(columns)
+    )
+
+
 def preprocess_frame(frame, size=FRAME_SIZE):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     resized = cv2.resize(gray, size, interpolation=cv2.INTER_AREA)
@@ -239,6 +252,7 @@ def run(
         else float(dt_ms)
     )
     centers = _grid_centers(size)
+    regions = _grid_regions(size)
     neurons = [LIFNeuron(dt_ms=nominal_dt_ms) for _ in centers]
     buffer = []
     drive_history = deque(maxlen=HISTORY_SIZE)
@@ -284,7 +298,7 @@ def run(
             if len(buffer) == 2:
                 stack = np.stack(buffer, axis=0)
                 drive, signals_by_time = lplc2_grid_bio_drive(
-                    stack, centers
+                    stack, centers, regions=regions
                 )
                 motion = motion_maps(stack)[:, 0]
                 current_drives = drive[-1]
@@ -376,5 +390,5 @@ def run(
 
 
 if __name__ == "__main__":
-    run(r"C:\Users\gavaj\Downloads\3.avi")
+    run(r"C:\Users\gavaj\Downloads\10.avi")
    # run(0)

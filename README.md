@@ -27,9 +27,10 @@ The neurons continue running after that so the dashboard and CSV can count
 subsequent spikes for each neuron.
 
 The 3x3 grid is currently an **engineering approximation**, not a biologically
-exact implementation of the Drosophila visual system. The grid uses different
-receptive-field centers, but fully local non-overlapping receptive-field
-regions have not yet been implemented.
+exact implementation of the Drosophila visual system. Each neuron currently
+uses one non-overlapping rectangular third of the frame as its local field,
+with radial directional masks applied inside that region. Circular receptive
+fields may be evaluated later.
 
 ## Running
 
@@ -50,6 +51,46 @@ To use the webcam, change the last line of `main.py` to:
 ```python
 run(0)
 ```
+
+## Synthetic tests
+
+The separate `synthetic_tests.py` script generates small AVI sequences with a
+white disk on a black background and runs the same real-time pipeline on them.
+Run all scenarios with:
+
+```powershell
+python synthetic_tests.py
+```
+
+Run one scenario, for example:
+
+```powershell
+python synthetic_tests.py --scenario loom_5
+```
+
+Results are stored in `synthetic_runs/<scenario-name>/`. Each scenario folder
+contains the generated `input.avi`, `realtime_log.csv`, and
+`first_spike_frames/`. The folder for a scenario is cleared before that
+scenario is generated again.
+
+The `loom_1` through `loom_9` scenarios test expansion in each grid region.
+`static_center` checks for activity without motion, `translation` checks
+constant-size horizontal motion, and `receding_center` checks the opposite of
+looming.
+
+The rectangular-field tests produced the expected first-spike neuron in all
+nine looming positions:
+
+```text
+loom_1 -> neuron 1    loom_2 -> neuron 2    loom_3 -> neuron 3
+loom_4 -> neuron 4    loom_5 -> neuron 5    loom_6 -> neuron 6
+loom_7 -> neuron 7    loom_8 -> neuron 8    loom_9 -> neuron 9
+```
+
+The static and receding controls produced no spikes. Constant-size horizontal
+translation produced spikes, showing that the current prototype detects
+strong local motion but does not yet distinguish looming from every other
+moving pattern.
 
 ## Development status
 
@@ -84,7 +125,7 @@ at the first spike.
   identify objects or guarantee that a collision will occur.
 - Camera motion, foliage, texture, lighting changes, and other scene motion
   can cause false positives.
-- The current grid does not provide a precise obstacle location.
+- The rectangular grid provides only a coarse obstacle location.
 - Parameters are experimentally configured and are not biological measurements.
 - Real-time testing is currently based on available recorded flights and
   should not be interpreted as a statistically complete benchmark.
