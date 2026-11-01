@@ -28,9 +28,9 @@ subsequent spikes for each neuron.
 
 The 3x3 grid is currently an **engineering approximation**, not a biologically
 exact implementation of the Drosophila visual system. Each neuron currently
-uses one non-overlapping rectangular third of the frame as its local field,
-with radial directional masks applied inside that region. Circular receptive
-fields may be evaluated later.
+uses a circular local field centered in its grid cell, with radial directional
+masks applied inside that circle. The circles are sized from the frame and
+grid dimensions and may overlap neighboring fields.
 
 ## Running
 
@@ -78,8 +78,8 @@ The `loom_1` through `loom_9` scenarios test expansion in each grid region.
 constant-size horizontal motion, and `receding_center` checks the opposite of
 looming.
 
-The rectangular-field tests produced the expected first-spike neuron in all
-nine looming positions:
+The previous rectangular-field tests produced the expected first-spike neuron
+in all nine looming positions:
 
 ```text
 loom_1 -> neuron 1    loom_2 -> neuron 2    loom_3 -> neuron 3
@@ -91,6 +91,11 @@ The static and receding controls produced no spikes. Constant-size horizontal
 translation produced spikes, showing that the current prototype detects
 strong local motion but does not yet distinguish looming from every other
 moving pattern.
+
+The current implementation uses the same nine centers with circular fields.
+These fields are the next experimental stage and must be rechecked against
+both synthetic and real recordings before their parameters are considered
+validated.
 
 ## Development status
 
@@ -125,7 +130,7 @@ at the first spike.
   identify objects or guarantee that a collision will occur.
 - Camera motion, foliage, texture, lighting changes, and other scene motion
   can cause false positives.
-- The rectangular grid provides only a coarse obstacle location.
+- The circular grid provides only a coarse obstacle location.
 - Parameters are experimentally configured and are not biological measurements.
 - Real-time testing is currently based on available recorded flights and
   should not be interpreted as a statistically complete benchmark.

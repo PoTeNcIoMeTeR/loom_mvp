@@ -18,7 +18,7 @@ SECTORS = ("right", "left", "up", "down")
 DEFAULT_GAIN = 0.5
 
 
-def radial_masks(shape, cx=None, cy=None):
+def radial_masks(shape, cx=None, cy=None, radius=None):
     if (
         not isinstance(shape, (tuple, list)) or
         len(shape) != 2 or
@@ -36,41 +36,52 @@ def radial_masks(shape, cx=None, cy=None):
         cy = (height - 1) / 2
     if not np.isfinite(cx) or not np.isfinite(cy):
         raise ValueError("cx and cy must be finite numbers")
+    if radius is not None and (
+        not np.isfinite(radius) or radius <= 0
+    ):
+        raise ValueError("radius must be positive and finite")
 
     y, x = np.mgrid[:height, :width]
     dx = x - cx
     dy = cy - y
     angle = np.arctan2(dy, dx)
     center = (dx == 0) & (dy == 0)
+    receptive_field = (
+        radius is None or dx ** 2 + dy ** 2 <= float(radius) ** 2
+    )
 
     return {
         "right": (
             (angle >= -np.pi / 4) &
             (angle < np.pi / 4) &
-            ~center
+            ~center &
+            receptive_field
         ).astype(float),
         "up": (
             (angle >= np.pi / 4) &
             (angle < 3 * np.pi / 4) &
-            ~center
+            ~center &
+            receptive_field
         ).astype(float),
         "left": (
             ((angle >= 3 * np.pi / 4) |
              (angle < -3 * np.pi / 4)) &
-            ~center
+            ~center &
+            receptive_field
         ).astype(float),
         "down": (
             (angle >= -3 * np.pi / 4) &
             (angle < -np.pi / 4) &
-            ~center
+            ~center &
+            receptive_field
         ).astype(float),
     }
 
 
-def sector_signals(stack, cx=None, cy=None, region=None):
+def sector_signals(stack, cx=None, cy=None, radius=None, region=None):
     """Return signed radial signals in right, left, up, down order."""
     right, left, up, down = motion_maps(stack)
-    masks = radial_masks(stack.shape[1:], cx, cy)
+    masks = radial_masks(stack.shape[1:], cx, cy, radius)
     if region is not None:
         y0, y1, x0, x1 = region
         height, width = stack.shape[1:]
@@ -98,6 +109,7 @@ def lplc2_bio_drive(
     stack,
     cx=None,
     cy=None,
+    radius=None,
     region=None,
     saturation=1.0,
     inhibition_gain=0.5,
@@ -114,7 +126,7 @@ def lplc2_bio_drive(
     if not np.isfinite(coincidence_power) or coincidence_power <= 0:
         raise ValueError("coincidence_power must be positive and finite")
 
-    signals = sector_signals(stack, cx, cy, region)
+    signals = sector_signals(stack, cx, cy, radius, region)
     excitation = np.maximum(signals, 0.0)
     inhibition = np.maximum(-signals, 0.0)
 
@@ -135,11 +147,15 @@ def lplc2_bio_drive(
     return np.maximum(drive, 0.0), signals
 
 
-def lplc2_grid_bio_drive(stack, centers, regions=None, **kwargs):
+def lplc2_grid_bio_drive(stack, centers, radii=None, regions=None, **kwargs):
     """Compute LPLC2-like drives for several receptive-field centers."""
     centers = tuple(centers)
     if not centers:
         raise ValueError("centers must contain at least one (cx, cy) pair")
+    if radii is not None:
+        radii = tuple(radii)
+        if len(radii) != len(centers):
+            raise ValueError("radii must match centers")
     if regions is not None:
         regions = tuple(regions)
         if len(regions) != len(centers):
@@ -157,6 +173,7 @@ def lplc2_grid_bio_drive(stack, centers, regions=None, **kwargs):
             stack,
             cx=center[0],
             cy=center[1],
+            radius=None if radii is None else radii[index],
             region=None if regions is None else regions[index],
             **kwargs,
         )

@@ -44,6 +44,17 @@ def _grid_regions(shape, grid_size=GRID_SIZE):
     )
 
 
+def _grid_radii(shape, grid_size=GRID_SIZE):
+    height, width = shape
+    rows, columns = grid_size
+    if rows < 1 or columns < 1:
+        raise ValueError("grid_size values must be positive")
+    return tuple(
+        min(height / rows, width / columns) / 2.0
+        for _ in range(rows * columns)
+    )
+
+
 def preprocess_frame(frame, size=FRAME_SIZE):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     resized = cv2.resize(gray, size, interpolation=cv2.INTER_AREA)
@@ -252,7 +263,7 @@ def run(
         else float(dt_ms)
     )
     centers = _grid_centers(size)
-    regions = _grid_regions(size)
+    radii = _grid_radii(size)
     neurons = [LIFNeuron(dt_ms=nominal_dt_ms) for _ in centers]
     buffer = []
     drive_history = deque(maxlen=HISTORY_SIZE)
@@ -298,7 +309,7 @@ def run(
             if len(buffer) == 2:
                 stack = np.stack(buffer, axis=0)
                 drive, signals_by_time = lplc2_grid_bio_drive(
-                    stack, centers, regions=regions
+                    stack, centers, radii=radii
                 )
                 motion = motion_maps(stack)[:, 0]
                 current_drives = drive[-1]
@@ -390,5 +401,5 @@ def run(
 
 
 if __name__ == "__main__":
-    run(r"C:\Users\gavaj\Downloads\10.avi")
+    run(r"C:\Users\gavaj\Downloads\345.avi")
    # run(0)
