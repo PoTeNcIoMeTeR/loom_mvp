@@ -99,6 +99,10 @@ compared with the outward direction from each field center. Positive alignment
 is retained, while inward alignment is suppressed. This is an experimental
 selectivity mechanism, not a complete optical-flow focus-of-expansion model.
 
+The current experimental version estimates one shared focus of expansion from
+the grid centers on each frame pair. All receptive fields then use that same
+focus when evaluating radial alignment.
+
 The circular-field synthetic tests still identify all nine looming positions
 correctly. Static scenes produce no spikes. Receding and translating controls
 can still produce occasional spikes in overlapping neighboring fields, so the

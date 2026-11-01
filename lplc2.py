@@ -152,12 +152,26 @@ def radial_expansion_score(
     return (outward - inward) / np.maximum(outward + inward, 1e-6)
 
 
+def estimate_focus_of_expansion(stack, candidates):
+    """Choose one candidate center with the strongest global expansion."""
+    candidates = tuple(candidates)
+    if not candidates:
+        raise ValueError("candidates must contain at least one center")
+    scores = np.asarray([
+        radial_expansion_score(stack, cx, cy)
+        for cx, cy in candidates
+    ])
+    index = int(np.argmax(scores[:, -1]))
+    return candidates[index], scores[index]
+
+
 def lplc2_bio_drive(
     stack,
     cx=None,
     cy=None,
     region=None,
     radius=None,
+    expansion_center=None,
     radial_gain=0.5,
     saturation=1.0,
     inhibition_gain=0.5,
@@ -177,8 +191,11 @@ def lplc2_bio_drive(
         raise ValueError("radial_gain must be finite and non-negative")
 
     signals = sector_signals(stack, cx, cy, region, radius)
+    radial_cx, radial_cy = (
+        (cx, cy) if expansion_center is None else expansion_center
+    )
     radial_score = radial_expansion_score(
-        stack, cx, cy, region, radius
+        stack, radial_cx, radial_cy, region, radius
     )
     excitation = np.maximum(signals, 0.0)
     inhibition = np.maximum(-signals, 0.0)
@@ -204,7 +221,9 @@ def lplc2_bio_drive(
     return np.maximum(drive, 0.0), signals
 
 
-def lplc2_grid_bio_drive(stack, centers, regions=None, radii=None, **kwargs):
+def lplc2_grid_bio_drive(
+    stack, centers, regions=None, radii=None, expansion_center=None, **kwargs
+):
     """Compute LPLC2-like drives for several receptive-field centers."""
     centers = tuple(centers)
     if not centers:
@@ -232,6 +251,7 @@ def lplc2_grid_bio_drive(stack, centers, regions=None, radii=None, **kwargs):
             cy=center[1],
             radius=None if radii is None else radii[index],
             region=None if regions is None else regions[index],
+            expansion_center=expansion_center,
             **kwargs,
         )
         drives.append(drive)

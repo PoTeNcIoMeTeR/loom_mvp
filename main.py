@@ -5,7 +5,10 @@ from pathlib import Path
 from time import perf_counter
 
 from lif import DT, LIFNeuron, V_THRESHOLD
-from lplc2 import lplc2_grid_bio_drive
+from lplc2 import (
+    estimate_focus_of_expansion,
+    lplc2_grid_bio_drive,
+)
 from motion import motion_maps
 from run_logger import RunLogger
 
@@ -308,8 +311,14 @@ def run(
             spiked_indices = []
             if len(buffer) == 2:
                 stack = np.stack(buffer, axis=0)
+                expansion_center, _ = estimate_focus_of_expansion(
+                    stack, centers
+                )
                 drive, signals_by_time = lplc2_grid_bio_drive(
-                    stack, centers, radii=radii
+                    stack,
+                    centers,
+                    radii=radii,
+                    expansion_center=expansion_center,
                 )
                 motion = motion_maps(stack)[:, 0]
                 current_drives = drive[-1]
@@ -401,5 +410,5 @@ def run(
 
 
 if __name__ == "__main__":
-    run(r"C:\Users\gavaj\Downloads\3.avi")
+    run(r"C:\Users\gavaj\Downloads\10.avi")
    # run(0)
