@@ -78,7 +78,7 @@ def radial_masks(shape, cx=None, cy=None, radius=None):
     }
 
 
-def sector_signals(stack, cx=None, cy=None, radius=None, region=None):
+def sector_signals(stack, cx=None, cy=None, region=None, radius=None):
     """Return signed radial signals in right, left, up, down order."""
     right, left, up, down = motion_maps(stack)
     masks = radial_masks(stack.shape[1:], cx, cy, radius)
@@ -105,12 +105,60 @@ def sector_signals(stack, cx=None, cy=None, radius=None, region=None):
     ], axis=1)
 
 
+def radial_expansion_score(
+    stack, cx=None, cy=None, region=None, radius=None
+):
+    """Return motion alignment with the outward radial direction."""
+    right, left, up, down = motion_maps(stack)
+    height, width = stack.shape[1:]
+    if cx is None:
+        cx = (width - 1) / 2
+    if cy is None:
+        cy = (height - 1) / 2
+    if not np.isfinite(cx) or not np.isfinite(cy):
+        raise ValueError("cx and cy must be finite numbers")
+    if radius is not None and (
+        not np.isfinite(radius) or radius <= 0
+    ):
+        raise ValueError("radius must be positive and finite")
+
+    y, x = np.mgrid[:height, :width]
+    dx = x - cx
+    dy = y - cy
+    distance = np.hypot(dx, dy)
+    valid = distance > 0
+    if radius is not None:
+        valid &= distance <= float(radius)
+    if region is not None:
+        y0, y1, x0, x1 = region
+        if not (
+            0 <= y0 < y1 <= height and
+            0 <= x0 < x1 <= width
+        ):
+            raise ValueError("region must be inside the frame")
+        local_mask = np.zeros((height, width), dtype=bool)
+        local_mask[y0:y1, x0:x1] = True
+        valid &= local_mask
+
+    horizontal = right - left
+    vertical = down - up
+    projection = (
+        horizontal * (dx / np.maximum(distance, 1e-12)) +
+        vertical * (dy / np.maximum(distance, 1e-12))
+    )
+    projection = np.where(valid, projection, 0.0)
+    outward = np.maximum(projection, 0.0).sum(axis=(1, 2))
+    inward = np.maximum(-projection, 0.0).sum(axis=(1, 2))
+    return (outward - inward) / np.maximum(outward + inward, 1e-6)
+
+
 def lplc2_bio_drive(
     stack,
     cx=None,
     cy=None,
-    radius=None,
     region=None,
+    radius=None,
+    radial_gain=0.5,
     saturation=1.0,
     inhibition_gain=0.5,
     coincidence_gain=1.0,
@@ -125,8 +173,13 @@ def lplc2_bio_drive(
         raise ValueError("coincidence_gain must be finite and non-negative")
     if not np.isfinite(coincidence_power) or coincidence_power <= 0:
         raise ValueError("coincidence_power must be positive and finite")
+    if not np.isfinite(radial_gain) or radial_gain < 0:
+        raise ValueError("radial_gain must be finite and non-negative")
 
-    signals = sector_signals(stack, cx, cy, radius, region)
+    signals = sector_signals(stack, cx, cy, region, radius)
+    radial_score = radial_expansion_score(
+        stack, cx, cy, region, radius
+    )
     excitation = np.maximum(signals, 0.0)
     inhibition = np.maximum(-signals, 0.0)
 
@@ -144,10 +197,14 @@ def lplc2_bio_drive(
         )
         - inhibition_gain * opponent_inhibition
     )
+    radial_factor = np.maximum(
+        0.0, 1.0 + radial_gain * radial_score
+    )
+    drive *= radial_factor
     return np.maximum(drive, 0.0), signals
 
 
-def lplc2_grid_bio_drive(stack, centers, radii=None, regions=None, **kwargs):
+def lplc2_grid_bio_drive(stack, centers, regions=None, radii=None, **kwargs):
     """Compute LPLC2-like drives for several receptive-field centers."""
     centers = tuple(centers)
     if not centers:

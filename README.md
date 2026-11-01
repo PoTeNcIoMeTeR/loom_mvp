@@ -10,6 +10,7 @@ motion, computes an LPLC2-like drive, and feeds the result to LIF neurons.
 two video frames
     -> directional motion maps
     -> 3x3 grid of LPLC2-like receptive-field centers
+    -> radial expansion selectivity
     -> nine independent LIF neurons
     -> first-spike alarm
 ```
@@ -93,9 +94,15 @@ strong local motion but does not yet distinguish looming from every other
 moving pattern.
 
 The current implementation uses the same nine centers with circular fields.
-These fields are the next experimental stage and must be rechecked against
-both synthetic and real recordings before their parameters are considered
-validated.
+The LPLC2-like drive also applies a radial expansion gate: local motion is
+compared with the outward direction from each field center. Positive alignment
+is retained, while inward alignment is suppressed. This is an experimental
+selectivity mechanism, not a complete optical-flow focus-of-expansion model.
+
+The circular-field synthetic tests still identify all nine looming positions
+correctly. Static scenes produce no spikes. Receding and translating controls
+can still produce occasional spikes in overlapping neighboring fields, so the
+radial gate requires further refinement.
 
 ## Development status
 
